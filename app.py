@@ -88,6 +88,18 @@ def fmt_pct(x):
         return str(x)
     return f"{v:.1%}"
 
+def fmt_pp(x):
+    """0.012 -> +1.2pp（百分点）"""
+    if x is None:
+        return ""
+    if isinstance(x, float) and np.isnan(x):
+        return ""
+    try:
+        v = float(x)
+    except Exception:
+        return str(x)
+    return f"{v*100:+.1f}pp"
+
 def ensure_exists_or_stop(p: Path, label: str):
     if not p.exists():
         st.error(
@@ -474,26 +486,41 @@ with tab2:
     st.plotly_chart(fig_cost_pct, use_container_width=True)
 
 # =========================
-# ✅ New: Weekly cost table (amount + WoW) 方案A
+# ✅ Weekly cost table: 金额 + 金额环比 + 占比 + 占比环比
 # =========================
-st.markdown("#### 每周成本明细（金额 + 环比）")
+st.markdown("#### 每周成本明细（金额 + 金额环比 + 占比 + 占比环比）")
 
 cost_items = [c for c in COST_COLS if c in weekly.columns]
 cost_week = weekly[["year_week"] + cost_items].copy()
 
+# 金额环比
 for c in cost_items:
-    cost_week[f"{c}_环比值"] = wow_delta(cost_week[c])
-    cost_week[f"{c}_环比%"] = wow_pct(cost_week[c])
+    cost_week[f"{c}_金额环比值"] = cost_week[c] - cost_week[c].shift(1)
+    prev = cost_week[c].shift(1)
+    cost_week[f"{c}_金额环比%"] = np.where(prev.notna() & (prev != 0), (cost_week[c] - prev) / np.abs(prev), np.nan)
 
+# 占比 & 占比环比（pp）
+cost_week["总成本"] = cost_week[cost_items].sum(axis=1)
+for c in cost_items:
+    cost_week[f"{c}_占比"] = np.where(cost_week["总成本"] != 0, cost_week[c] / cost_week["总成本"], np.nan)
+    cost_week[f"{c}_占比环比pp"] = cost_week[f"{c}_占比"] - cost_week[f"{c}_占比"].shift(1)
+
+# 展示格式化
 cost_week_show = cost_week.copy()
+cost_week_show["总成本"] = cost_week_show["总成本"].apply(fmt_money)
+
 for c in cost_items:
     cost_week_show[c] = cost_week_show[c].apply(fmt_money)
-    cost_week_show[f"{c}_环比值"] = cost_week_show[f"{c}_环比值"].apply(fmt_money)
-    cost_week_show[f"{c}_环比%"] = cost_week_show[f"{c}_环比%"].apply(fmt_pct)
+    cost_week_show[f"{c}_金额环比值"] = cost_week_show[f"{c}_金额环比值"].apply(fmt_money)
+    cost_week_show[f"{c}_金额环比%"] = cost_week_show[f"{c}_金额环比%"].apply(fmt_pct)
 
-ordered_cols = ["year_week"]
+    cost_week_show[f"{c}_占比"] = cost_week_show[f"{c}_占比"].apply(fmt_pct)
+    cost_week_show[f"{c}_占比环比pp"] = cost_week_show[f"{c}_占比环比pp"].apply(fmt_pp)
+
+# 列顺序：year_week + 总成本，然后每个成本项按（金额 / 金额环比值 / 金额环比% / 占比 / 占比环比pp）
+ordered_cols = ["year_week", "总成本"]
 for c in cost_items:
-    ordered_cols += [c, f"{c}_环比值", f"{c}_环比%"]
+    ordered_cols += [c, f"{c}_金额环比值", f"{c}_金额环比%", f"{c}_占比", f"{c}_占比环比pp"]
 
 st.dataframe(cost_week_show[ordered_cols], use_container_width=True, hide_index=True)
 

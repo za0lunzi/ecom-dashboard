@@ -486,43 +486,76 @@ with tab2:
     st.plotly_chart(fig_cost_pct, use_container_width=True)
 
 # =========================
-# ✅ Weekly cost table: 金额 + 金额环比 + 占比 + 占比环比
+# ✅ Weekly cost tables: 更直观（拆分 Tab + 成本项筛选 + 最近N周）
 # =========================
-st.markdown("#### 每周成本明细（金额 + 金额环比 + 占比 + 占比环比）")
+st.markdown("#### 每周成本明细（更直观版）")
 
-cost_items = [c for c in COST_COLS if c in weekly.columns]
-cost_week = weekly[["year_week"] + cost_items].copy()
+cost_items_all = [c for c in COST_COLS if c in weekly.columns]
+if len(cost_items_all) == 0:
+    st.info("当前筛选下没有可用的成本列。")
+else:
+    c_sel1, c_sel2 = st.columns([2, 1])
 
-# 金额环比
-for c in cost_items:
-    cost_week[f"{c}_金额环比值"] = cost_week[c] - cost_week[c].shift(1)
-    prev = cost_week[c].shift(1)
-    cost_week[f"{c}_金额环比%"] = np.where(prev.notna() & (prev != 0), (cost_week[c] - prev) / np.abs(prev), np.nan)
+    with c_sel1:
+        picked = st.multiselect(
+            "选择要看的成本项（不选=全部）",
+            options=cost_items_all,
+            default=cost_items_all
+        )
 
-# 占比 & 占比环比（pp）
-cost_week["总成本"] = cost_week[cost_items].sum(axis=1)
-for c in cost_items:
-    cost_week[f"{c}_占比"] = np.where(cost_week["总成本"] != 0, cost_week[c] / cost_week["总成本"], np.nan)
-    cost_week[f"{c}_占比环比pp"] = cost_week[f"{c}_占比"] - cost_week[f"{c}_占比"].shift(1)
+    with c_sel2:
+        last_n = st.slider("显示最近 N 周", min_value=4, max_value=52, value=12, step=1)
 
-# 展示格式化
-cost_week_show = cost_week.copy()
-cost_week_show["总成本"] = cost_week_show["总成本"].apply(fmt_money)
+    cost_items = picked if picked else cost_items_all
 
-for c in cost_items:
-    cost_week_show[c] = cost_week_show[c].apply(fmt_money)
-    cost_week_show[f"{c}_金额环比值"] = cost_week_show[f"{c}_金额环比值"].apply(fmt_money)
-    cost_week_show[f"{c}_金额环比%"] = cost_week_show[f"{c}_金额环比%"].apply(fmt_pct)
+    # 基础表：最近N周
+    base = weekly[["year_week"] + cost_items].copy().tail(last_n)
 
-    cost_week_show[f"{c}_占比"] = cost_week_show[f"{c}_占比"].apply(fmt_pct)
-    cost_week_show[f"{c}_占比环比pp"] = cost_week_show[f"{c}_占比环比pp"].apply(fmt_pp)
+    # 金额变化表
+    amt = base.copy()
+    for c in cost_items:
+        amt[f"{c}_环比值"] = amt[c] - amt[c].shift(1)
+        prev = amt[c].shift(1)
+        amt[f"{c}_环比%"] = np.where(prev.notna() & (prev != 0), (amt[c] - prev) / np.abs(prev), np.nan)
 
-# 列顺序：year_week + 总成本，然后每个成本项按（金额 / 金额环比值 / 金额环比% / 占比 / 占比环比pp）
-ordered_cols = ["year_week", "总成本"]
-for c in cost_items:
-    ordered_cols += [c, f"{c}_金额环比值", f"{c}_金额环比%", f"{c}_占比", f"{c}_占比环比pp"]
+    amt_show = amt.copy()
+    for c in cost_items:
+        amt_show[c] = amt_show[c].apply(fmt_money)
+        amt_show[f"{c}_环比值"] = amt_show[f"{c}_环比值"].apply(fmt_money)
+        amt_show[f"{c}_环比%"] = amt_show[f"{c}_环比%"].apply(fmt_pct)
 
-st.dataframe(cost_week_show[ordered_cols], use_container_width=True, hide_index=True)
+    amt_cols = ["year_week"]
+    for c in cost_items:
+        amt_cols += [c, f"{c}_环比值", f"{c}_环比%"]
+
+    # 占比变化表
+    share = base.copy()
+    share["总成本"] = share[cost_items].sum(axis=1)
+
+    for c in cost_items:
+        share[f"{c}_占比"] = np.where(share["总成本"] != 0, share[c] / share["总成本"], np.nan)
+        share[f"{c}_占比环比pp"] = share[f"{c}_占比"] - share[f"{c}_占比"].shift(1)
+
+    share_show = share.copy()
+    share_show["总成本"] = share_show["总成本"].apply(fmt_money)
+
+    for c in cost_items:
+        share_show[f"{c}_占比"] = share[f"{c}_占比"].apply(fmt_pct)
+        share_show[f"{c}_占比环比pp"] = share[f"{c}_占比环比pp"].apply(fmt_pp)
+
+    share_cols = ["year_week", "总成本"]
+    for c in cost_items:
+        share_cols += [f"{c}_占比", f"{c}_占比环比pp"]
+
+    t1, t2 = st.tabs(["金额变化（金额+环比）", "占比变化（结构+环比）"])
+
+    with t1:
+        st.caption("说明：环比% = (本周金额 - 上周金额) / 上周金额")
+        st.dataframe(amt_show[amt_cols], use_container_width=True, hide_index=True)
+
+    with t2:
+        st.caption("说明：占比=成本项/总成本；占比环比pp=本周占比-上周占比（百分点）")
+        st.dataframe(share_show[share_cols], use_container_width=True, hide_index=True)
 
 # =========================
 # Single-week snapshot (amount + share + profit)

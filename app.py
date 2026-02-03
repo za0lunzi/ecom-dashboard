@@ -90,8 +90,10 @@ def fmt_pct(x):
 
 def ensure_exists_or_stop(p: Path, label: str):
     if not p.exists():
-        st.error(f"❌ 找不到 {label}：{p}\n\n"
-                 f"请确认文件已上传到仓库根目录（或 data/ 目录）且文件名一致。")
+        st.error(
+            f"❌ 找不到 {label}：{p}\n\n"
+            f"请确认文件已上传到仓库根目录（或 data/ 目录）且文件名一致。"
+        )
         st.stop()
 
 # =========================
@@ -108,7 +110,6 @@ mp = load_excel(MAP_FILE)
 # =========================
 sales = sales.loc[:, ~sales.columns.astype(str).str.startswith("Unnamed")].copy()
 
-# 必需字段检查（不够就提示）
 required_cols = ["平台", "ORDER_PLACED_DT", "year", "week", "VENDOR_SKU", "QUANTITY", "gmv（￥）", "利润", "利润率"]
 missing = [c for c in required_cols if c not in sales.columns]
 if missing:
@@ -130,7 +131,6 @@ sales["year_week"] = sales.apply(
 
 sales["product_key"] = sales.apply(lambda r: make_product_key(r["平台"], r["VENDOR_SKU"]), axis=1)
 
-# 数值列
 num_cols = ["gmv（￥）", "QUANTITY", "利润", "利润率"] + COST_COLS
 sales = safe_to_numeric(sales, num_cols)
 
@@ -138,9 +138,6 @@ sales = safe_to_numeric(sales, num_cols)
 # Clean mapping -> long (by platform)
 # =========================
 mp = mp.copy()
-# 允许 mapping 表字段存在也可能不一致，做“尽力匹配”
-# 你当前示例里有这些列名：
-# 沃尔玛SKU / 亚马逊sku / 产品名 / 产品品类 / 月度目标-wfs / 目前库存-wfs / 在途库存-wfs / 月度目标-fba / 目前库存-fba / 在途库存-fba
 for c in ["沃尔玛SKU", "亚马逊sku"]:
     if c in mp.columns:
         mp[c] = mp[c].astype(str).str.strip()
@@ -194,7 +191,6 @@ df = sales.merge(
     how="left"
 )
 
-# 品类：优先 sales 的“产品类别”，为空用 mapping 补
 if "产品类别" in df.columns:
     df["产品类别"] = df["产品类别"].fillna(df["产品类别_map"])
 else:
@@ -252,7 +248,6 @@ agg_dict = {
 weekly = df_f.groupby("year_week", as_index=False).agg(agg_dict)
 weekly["利润率"] = np.where(weekly["gmv（￥）"] != 0, weekly["利润"] / weekly["gmv（￥）"], np.nan)
 
-# sort by year/week
 weekly["year_num"] = weekly["year_week"].str.extract(r"(\d{4})").astype(float)
 weekly["week_num"] = weekly["year_week"].str.extract(r"W(\d{2})").astype(float)
 weekly = weekly.sort_values(["year_num", "week_num"]).drop(columns=["year_num", "week_num"])
@@ -328,23 +323,21 @@ def make_dual_line(left_label, left_col, right_label, right_col):
 
     return fig
 
-# =========================
-# "周报表"（趋势图下方：只显示当前选择的指标 + 环比）
-# =========================
 def build_wow_table_single(col: str, label: str):
     tmp = weekly[["year_week", col]].copy()
     tmp["环比值"] = wow_delta(tmp[col])
     tmp["环比%"] = wow_pct(tmp[col])
-    # format
+
     out = tmp.copy()
     if col == "利润率":
         out[label] = out[col].apply(fmt_pct)
-        out["环比值"] = out["环比值"].apply(fmt_pct)   # 利润率环比“值”也是百分点变化（这里用百分比显示更直观）
+        out["环比值"] = out["环比值"].apply(fmt_pct)
         out["环比%"] = out["环比%"].apply(fmt_pct)
     else:
         out[label] = out[col].apply(fmt_money)
         out["环比值"] = out["环比值"].apply(fmt_money)
         out["环比%"] = out["环比%"].apply(fmt_pct)
+
     out = out.drop(columns=[col])
     return out
 
@@ -360,7 +353,6 @@ def build_wow_table_dual(left_col, left_label, right_col, right_label):
 
     out = tmp.copy()
 
-    # left formatting
     if left_col == "利润率":
         out[left_label] = out[left_col].apply(fmt_pct)
         out[f"{left_label}_环比值"] = out[f"{left_label}_环比值"].apply(fmt_pct)
@@ -370,7 +362,6 @@ def build_wow_table_dual(left_col, left_label, right_col, right_label):
         out[f"{left_label}_环比值"] = out[f"{left_label}_环比值"].apply(fmt_money)
         out[f"{left_label}_环比%"] = out[f"{left_label}_环比%"].apply(fmt_pct)
 
-    # right formatting
     if right_col == "利润率":
         out[right_label] = out[right_col].apply(fmt_pct)
         out[f"{right_label}_环比值"] = out[f"{right_label}_环比值"].apply(fmt_pct)
@@ -383,7 +374,6 @@ def build_wow_table_dual(left_col, left_label, right_col, right_label):
     out = out.drop(columns=[left_col, right_col])
     return out
 
-# draw chart + wow table
 if chart_mode == "单指标":
     metric_label = st.sidebar.selectbox("趋势指标", list(metric_map.keys()), index=0)
     metric_col = metric_map[metric_label]
@@ -393,7 +383,6 @@ if chart_mode == "单指标":
     st.markdown("#### 周报表（当前指标 + 环比）")
     wow_tbl = build_wow_table_single(metric_col, metric_label)
     st.dataframe(wow_tbl, use_container_width=True)
-
 else:
     keys = list(metric_map.keys())
     left_label = st.sidebar.selectbox("左轴指标", keys, index=0)
@@ -417,9 +406,9 @@ st.subheader("目标与达成（按月）")
 
 if df_f["ORDER_PLACED_DT"].notna().any():
     current_month = df_f["ORDER_PLACED_DT"].max().to_period("M")
-    df_f = df_f.copy()
-    df_f["year_month"] = df_f["ORDER_PLACED_DT"].dt.to_period("M")
-    cur = df_f[df_f["year_month"] == current_month].copy()
+    df_f2 = df_f.copy()
+    df_f2["year_month"] = df_f2["ORDER_PLACED_DT"].dt.to_period("M")
+    cur = df_f2[df_f2["year_month"] == current_month].copy()
 
     sku_month = cur.groupby(["平台", "VENDOR_SKU"], as_index=False).agg(
         本月销量=("QUANTITY", "sum"),
@@ -443,7 +432,6 @@ if df_f["ORDER_PLACED_DT"].notna().any():
 
     st.write("SKU 目标完成率（Top 20）")
     st.dataframe(show_top, use_container_width=True)
-
 else:
     st.info("当前筛选数据没有可用日期，无法计算本月目标达成。")
 
@@ -486,6 +474,30 @@ with tab2:
     st.plotly_chart(fig_cost_pct, use_container_width=True)
 
 # =========================
+# ✅ New: Weekly cost table (amount + WoW) 方案A
+# =========================
+st.markdown("#### 每周成本明细（金额 + 环比）")
+
+cost_items = [c for c in COST_COLS if c in weekly.columns]
+cost_week = weekly[["year_week"] + cost_items].copy()
+
+for c in cost_items:
+    cost_week[f"{c}_环比值"] = wow_delta(cost_week[c])
+    cost_week[f"{c}_环比%"] = wow_pct(cost_week[c])
+
+cost_week_show = cost_week.copy()
+for c in cost_items:
+    cost_week_show[c] = cost_week_show[c].apply(fmt_money)
+    cost_week_show[f"{c}_环比值"] = cost_week_show[f"{c}_环比值"].apply(fmt_money)
+    cost_week_show[f"{c}_环比%"] = cost_week_show[f"{c}_环比%"].apply(fmt_pct)
+
+ordered_cols = ["year_week"]
+for c in cost_items:
+    ordered_cols += [c, f"{c}_环比值", f"{c}_环比%"]
+
+st.dataframe(cost_week_show[ordered_cols], use_container_width=True, hide_index=True)
+
+# =========================
 # Single-week snapshot (amount + share + profit)
 # =========================
 st.subheader("单周快照（金额 + 占比 + 利润）")
@@ -503,15 +515,14 @@ else:
     a3.metric("利润率", f"{row['利润率']:.1%}" if pd.notna(row["利润率"]) else "—")
     a4.metric("广告费", f"{row['广告费']:,.0f}")
 
-    cost_items = [c for c in COST_COLS if c in weekly.columns]
+    cost_items2 = [c for c in COST_COLS if c in weekly.columns]
     cost_table = pd.DataFrame({
-        "成本项": cost_items,
-        "金额": [row[c] for c in cost_items],
+        "成本项": cost_items2,
+        "金额": [row[c] for c in cost_items2],
     })
     cost_sum = cost_table["金额"].sum()
     cost_table["占比"] = np.where(cost_sum != 0, cost_table["金额"] / cost_sum, np.nan)
 
-    # format table
     cost_table_show = cost_table.copy()
     cost_table_show["金额"] = cost_table_show["金额"].apply(fmt_money)
     cost_table_show["占比"] = cost_table_show["占比"].apply(fmt_pct)
@@ -523,15 +534,16 @@ else:
 
     with right:
         fig_pie = px.pie(cost_table, names="成本项", values="金额", title="成本占比（环图）", hole=0.45)
-        fig_pie.update_traces(textinfo="percent+label",
-                              hovertemplate="%{label}: %{value:,.0f}（%{percent}）<extra></extra>")
+        fig_pie.update_traces(
+            textinfo="percent+label",
+            hovertemplate="%{label}: %{value:,.0f}（%{percent}）<extra></extra>"
+        )
         fig_pie.update_layout(hoverlabel=dict(font_size=HOVER_FONT_SIZE))
         st.plotly_chart(fig_pie, use_container_width=True)
 
-    # waterfall: GMV -> costs -> profit
-    measures = ["absolute"] + ["relative"] * len(cost_items) + ["total"]
-    x = ["GMV"] + cost_items + ["利润"]
-    y = [row["gmv（￥）"]] + [-row[c] for c in cost_items] + [row["利润"]]
+    measures = ["absolute"] + ["relative"] * len(cost_items2) + ["total"]
+    x = ["GMV"] + cost_items2 + ["利润"]
+    y = [row["gmv（￥）"]] + [-row[c] for c in cost_items2] + [row["利润"]]
 
     fig_wf = go.Figure(go.Waterfall(
         name="",
